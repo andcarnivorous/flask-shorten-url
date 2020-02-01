@@ -1,19 +1,29 @@
-from flask import Flask
-from flask import request
+from flask import Flask, request, render_template
 import flask
 import utils
 import os
 import logging
+import sqlite3
 
 service = Flask(__name__)
 
-@service.route('/')
+form = """<form method="POST">
+    <input name="text">
+    <input type="submit">
+</form>"""
+
+@service.route('/',methods=['GET','POST'])
 def test():
-    return 'Test app for job application'
+    if request.method == "POST":
+        text = request.form['text']
+        processed_text = text.upper()
+        return web_shorten(processed_text)
+    else:
+        return form
 
 @service.errorhandler(400)
 def no_url():
-    return "URL not present",400
+    return "URL not present or invalid",400
 
 @service.errorhandler(409)
 def already_used():
@@ -37,27 +47,60 @@ def shorten():
 
         url = received["url"] if received["url"] else ""
 
-        if len(url) < 2:
+        if len(url) < 2 or utils.check_url(url) == False:
             return no_url()
 
-        check = utils.check_entry(url)
+        conn = utils.create_connection("test.db")
+        
+        check = utils.check_entry(url, conn)
         db_url = check[1] if check else False
         
         if db_url and db_url == url:
-              return already_used()
+            conn.close()
+            return already_used()
 
         try:
             shortcode = received["shortcode"]
-        except:
+        except KeyError:
             logging.warn("No shortcode provided, generating one...")
             shortcode = utils.make_key(6)
 
         if utils.check_shortcode(shortcode) == False:
+            conn.close()
             return invalid_code()
 
     _date = utils.get_date()
-    utils.new_entry(url, shortcode, _date, _date)
+    utils.new_entry(url, shortcode, _date, _date, conn)
+    conn.close()
     return flask.make_response(shortcode, 201)
+
+@service.route('/web_shorten')
+def web_shorten(url):
+
+    url = url.strip()
+    
+    if len(url) < 2 or utils.check_url(url) == False:
+        return no_url()
+
+    conn = utils.create_connection("test.db")
+
+    check = utils.check_entry(url, conn)
+    
+    db_url = check[1] if check else False
+
+    if db_url and db_url == url:
+        conn.close()
+        return already_used()
+
+    shortcode = utils.make_key(6)
+
+    _date = utils.get_date()
+
+    utils.new_entry(url, shortcode, _date, _date, conn)
+    conn.close()
+
+    return shortcode
+
 
 @service.route('/<shortcode>')
 def showShortcode(shortcode):
@@ -65,14 +108,17 @@ def showShortcode(shortcode):
     Receives a shortcode, check whether it's in the db and if so returns the corresponding url
     """
     try:
-        entry, url = utils.check_entry(shortcode)
+        conn = utils.create_connection("test.db")
+        entry, url = utils.check_entry(shortcode, conn)
         if entry:
             newdate = utils.get_date()
-            utils.update_entry(shortcode)
+            utils.update_entry(shortcode, conn)
+            conn.close()
             resp = flask.make_response(url, 302)
             resp.headers["Location"] = url
             return resp
     except:
+        conn.close()
         return not_found()
 
 @service.route('/<shortcode>/stats')
@@ -82,12 +128,15 @@ def shortcodeStats(shortcode):
     """
  
     try:
-        entry, url = utils.check_entry(shortcode)
+        conn = utils.create_connection("test.db")
+        entry, url = utils.check_entry(shortcode, conn)
         if entry:
-            stats = utils.get_stats(shortcode)
+            stats = utils.get_stats(shortcode, conn)
             stats = flask.jsonify(stats)
+            conn.close()
             return flask.make_response(stats, 200)
     except:
+        conn.close()
         return not_found()
 
 if __name__ == '__main__':
@@ -95,6 +144,6 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.WARNING, filename="logs.log")
     
     if "test.db" in os.listdir():
-        service.run(host="0.0.0.0")
+        service.run(port=5000)
     else:
         logging.error("You need to create the test.db file first.\nRun python3 db.py")

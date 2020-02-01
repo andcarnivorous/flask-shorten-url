@@ -2,8 +2,13 @@ import string
 import datetime
 import random
 import sqlite3
+import re
+
 from sqlite3 import Error
 from db import create_connection
+
+REGEX = re.compile(r"^(?:https?://)?w{0,3}\.?[\w\d\-\_]+\.[\w]+")
+
 
 def make_key(_range: int) -> string:
     """
@@ -17,6 +22,15 @@ def make_key(_range: int) -> string:
         key += random.choice(alphanum)
 
     return key
+
+def check_url(url: str) -> bool:
+    
+    match = re.match(REGEX, url)
+    if match != None:
+        return True
+    else:
+        return False
+    
 
 def check_shortcode(shortcode: str) -> bool:
     """
@@ -39,7 +53,7 @@ def check_shortcode(shortcode: str) -> bool:
 def get_date():
     return datetime.datetime.now().isoformat()
 
-def new_entry(url, shortcode, lastRedirect, created):
+def new_entry(url: str, shortcode: str, lastRedirect: str, created: str, conn):
     """
     Adds a new entry to the database
     :param url: url to add into the database
@@ -49,7 +63,6 @@ def new_entry(url, shortcode, lastRedirect, created):
     """
     sql = """INSERT INTO visitors (url, shortcode, lastRedirect, redirectCount, created)
     VALUES ('%s', '%s', '%s', 1, '%s')""" % (url, shortcode, lastRedirect, created)
-    conn = create_connection("test.db")
     if conn:
         c = conn.cursor()
         try:
@@ -57,32 +70,30 @@ def new_entry(url, shortcode, lastRedirect, created):
         except sqlite3.Error as error:
             return Error
         conn.commit()
-        conn.close()
+
         
-def check_entry(entry):
+def check_entry(entry, conn) -> bool:
     """
     Check whether a url or shortcode is already present in the db.
     :param entry: url or shortcode
     :return: False if not present, url and shortcode if already present
     """
-    conn = create_connection("test.db")
     if conn:
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
         c.execute("SELECT * FROM visitors")
         rows = c.fetchall()
-        conn.close()
+
         for row in rows:
             if row["shortcode"] == str(entry) or row["url"] == str(entry):
                 return (row["shortcode"], row["url"])
         return False
 
-def update_entry(shortcode):
+def update_entry(shortcode: str, conn):
     """
     Updates lastRedirect and redirectCount when someone uses the shortcode
     :param shortcode: shortcode used
     """
-    conn = create_connection("test.db")
     if conn:
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
@@ -97,21 +108,20 @@ def update_entry(shortcode):
 
         c.execute(sql)
         conn.commit()
-        conn.close()
 
-def get_stats(shortcode):
+
+def get_stats(shortcode: str, conn):
     """
     Returns redirectCount, created and lastRedirect date from a shortcode
     :param shortcode: shortcode from which to pull stats
     :return: dictionary with redirectCount, created and lastRedirect
     """
-    conn = create_connection("test.db")
     if conn:
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
         c.execute("SELECT * FROM visitors")
         rows = c.fetchall()
-        conn.close()
+
         match = [i for i in rows if i["shortcode"] == shortcode]
         if len(match) != 1:
             return False
